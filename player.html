@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<title>Odtwarzacz — Twitch VOD</title>
+
+<!--
+  STRONA-WRAPPER ODTWARZACZA
+
+  Po co
+  -----
+  Twitch Developer Console nie daje aplikacjom zewnętrznym dostępu do
+  playback access tokenu (gql.twitch.tv odrzuca nasz Client-Id), więc
+  jedyną drogą do odtwarzania jest oficjalny embed. Embed z kolei wymaga
+  osadzenia w ramce na domenie zadeklarowanej parametrem `parent`.
+
+  Ta strona jest tą domeną. Aplikacja ładuje ją w WKWebView i podaje numer
+  VOD-a w query stringu.
+
+  Jak działa parametr parent
+  --------------------------
+  Twitch przepisuje wartość `parent` wprost do nagłówka odpowiedzi:
+      Content-Security-Policy: frame-ancestors https://<parent>
+  Przeglądarka pozwala osadzić ramkę tylko wtedy, gdy origin strony
+  nadrzędnej zgadza się co do znaku. Strona jest serwowana z
+  https://webmasterpl.github.io, więc parent to GOŁA nazwa hosta.
+  Wpisanie "https://..." powoduje, że Twitch nie odsyła nagłówka CSP
+  w ogóle i osadzenie się nie uda.
+
+  Uprawnienia
+  -----------
+  Embed sam egzekwuje subskrypcje - VOD sub-only zagra tylko wtedy, gdy
+  sesja Twitcha w tym WebView należy do konta z aktywną subskrypcją.
+  Nic tu tego nie omija i omijać nie ma zamiaru.
+
+  Zero zależności: brak CDN-ów, brak analytics, brak cookies własnych.
+-->
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+  }
+
+  #frame {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    display: block;
+  }
+
+  #message {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 24px;
+    text-align: center;
+    color: #adadb8;
+    background: #0e0e10;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #message strong {
+    color: #efeff1;
+    font-size: 16px;
+  }
+</style>
+</head>
+
+<body>
+<script>
+(function () {
+  'use strict';
+
+  // Goła nazwa hosta - z protokołem Twitch nie odsyła nagłówka CSP.
+  var PARENT = 'webmasterpl.github.io';
+
+  function showMessage(title, detail) {
+    var box = document.createElement('div');
+    box.id = 'message';
+    var h = document.createElement('strong');
+    h.textContent = title;
+    box.appendChild(h);
+    if (detail) {
+      var p = document.createElement('div');
+      p.textContent = detail;
+      box.appendChild(p);
+    }
+    document.body.appendChild(box);
+  }
+
+  var params = new URLSearchParams(window.location.search || '');
+  var raw = (params.get('v') || params.get('video') || '').trim();
+
+  // Przyjmujemy 123456789, v123456789 albo pełny adres twitch.tv/videos/123456789
+  var match = /(\d{6,})/.exec(raw);
+  var videoId = match ? match[1] : '';
+
+  if (!videoId) {
+    showMessage(
+      'Brak identyfikatora VOD-a',
+      'Ta strona jest ładowana przez aplikację i wymaga numeru VOD-a w adresie.'
+    );
+    return;
+  }
+
+  var src =
+    'https://player.twitch.tv/?video=' + encodeURIComponent(videoId) +
+    '&parent=' + encodeURIComponent(PARENT) +
+    '&autoplay=true' +
+    '&muted=false';
+
+  var iframe = document.createElement('iframe');
+  iframe.id = 'frame';
+  iframe.src = src;
+  iframe.setAttribute('allowfullscreen', '');
+  iframe.setAttribute('allow', 'autoplay; fullscreen; picture-in-picture; encrypted-media');
+  iframe.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+  document.body.appendChild(iframe);
+})();
+</script>
+</body>
+</html>
