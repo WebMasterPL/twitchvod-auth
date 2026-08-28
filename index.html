@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Logowanie — Twitch VOD</title>
+
+<!--
+  STRONA-POMOST OAUTH
+
+  Po co ona istnieje
+  -----------------
+  Twitch Developer Console nie przyjmuje custom scheme (twitchvod://) jako
+  OAuth Redirect URL - wymaga adresu HTTPS. Ta strona jest tym adresem HTTPS.
+  Jej jedyne zadanie: odebrać odpowiedź Twitcha i przekazać ją do aplikacji
+  pod twitchvod://auth.
+
+  Przepływ
+  --------
+  1. Aplikacja otwiera id.twitch.tv/oauth2/authorize z redirect_uri
+     ustawionym na adres TEJ strony.
+  2. Twitch po zalogowaniu odsyła tutaj z tokenem we fragmencie URL:
+     https://<uzytkownik>.github.io/twitchvod-auth/#access_token=...&state=...
+  3. Ten skrypt przepisuje fragment 1:1 na twitchvod://auth#access_token=...
+  4. iOS otwiera aplikację, ASWebAuthenticationSession przechwytuje adres
+     i oddaje go do kodu aplikacji.
+
+  Dlaczego to jest bezpieczne
+  ---------------------------
+  Token przychodzi we FRAGMENCIE adresu (część po znaku #). Przeglądarki
+  z zasady NIE wysyłają fragmentu do serwera - nie trafia on do żądania HTTP,
+  nie ma go w logach GitHub Pages ani u żadnego pośrednika. Token istnieje
+  wyłącznie w pamięci tej karty i zostaje natychmiast przekazany do aplikacji.
+
+  Strona nie ma żadnych zewnętrznych zależności: bez CDN-ów, bez czcionek
+  z sieci, bez analytics, bez cookies. Wszystko - style i skrypt - jest inline,
+  więc nic stąd nie wychodzi do trzecich stron.
+-->
+
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e0e10;
+    --surface: #18181b;
+    --border: #2a2a30;
+    --text: #efeff1;
+    --muted: #adadb8;
+    --accent: #9147ff;
+    --danger: #f5515f;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main {
+    width: 100%;
+    max-width: 420px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 32px 24px;
+    text-align: center;
+  }
+
+  h1 {
+    margin: 0 0 12px;
+    font-size: 20px;
+    font-weight: 700;
+  }
+
+  p {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-size: 15px;
+  }
+
+  p.detail {
+    font-size: 13px;
+    word-break: break-word;
+  }
+
+  .error h1 { color: var(--danger); }
+
+  a.button {
+    display: inline-block;
+    margin-top: 20px;
+    padding: 14px 28px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  a.button:active { background: #772ce8; }
+
+  .spinner {
+    width: 28px;
+    height: 28px;
+    margin: 0 auto 20px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    .spinner { animation: none; }
+  }
+</style>
+</head>
+
+<body>
+<main id="root">
+  <div class="spinner" aria-hidden="true"></div>
+  <h1>Przekierowuję do aplikacji…</h1>
+  <p>Jeśli nic się nie dzieje, użyj przycisku poniżej.</p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  var APP_SCHEME = 'twitchvod://auth';
+  var root = document.getElementById('root');
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function render(html, isError) {
+    root.className = isError ? 'error' : '';
+    root.innerHTML = html;
+  }
+
+  function showMessage(title, message, detail) {
+    var html = '<h1>' + escapeHtml(title) + '</h1><p>' + escapeHtml(message) + '</p>';
+    if (detail) {
+      html += '<p class="detail">' + escapeHtml(detail) + '</p>';
+    }
+    html += '<a class="button" href="' + APP_SCHEME + '">Otwórz aplikację</a>';
+    render(html, true);
+  }
+
+  // Fragment (część po #) nie jest wysyłany na serwer przez przeglądarkę -
+  // token widzi wyłącznie ten skrypt.
+  var hash = window.location.hash || '';
+  if (hash.charAt(0) === '#') {
+    hash = hash.slice(1);
+  }
+
+  var params = new URLSearchParams(hash);
+
+  // Twitch potrafi zwrócić błąd zarówno we fragmencie, jak i w query stringu.
+  var queryParams = new URLSearchParams(window.location.search || '');
+  var error = params.get('error') || queryParams.get('error');
+  var errorDescription =
+    params.get('error_description') || queryParams.get('error_description');
+
+  if (error) {
+    var friendly =
+      error === 'access_denied'
+        ? 'Odmówiono dostępu do konta. Jeśli to pomyłka, wróć do aplikacji i spróbuj zalogować się jeszcze raz.'
+        : 'Twitch odrzucił logowanie.';
+    showMessage(
+      'Logowanie nie powiodło się',
+      friendly,
+      errorDescription || 'Kod błędu: ' + error
+    );
+    return;
+  }
+
+  if (!hash || !params.get('access_token')) {
+    showMessage(
+      'Brak danych logowania',
+      'Ta strona działa tylko jako punkt powrotu z logowania Twitcha. ' +
+        'Otwórz ją przez przycisk logowania w aplikacji, a nie bezpośrednio.'
+    );
+    return;
+  }
+
+  var target = APP_SCHEME + '#' + hash;
+
+  // Fallback: Safari czasem blokuje automatyczne przejście na custom scheme
+  // (np. przy braku gestu użytkownika). Link zostaje na ekranie, żeby dało się
+  // dokończyć ręcznie.
+  render(
+    '<div class="spinner" aria-hidden="true"></div>' +
+      '<h1>Przekierowuję do aplikacji…</h1>' +
+      '<p>Jeśli nic się nie dzieje, użyj przycisku poniżej.</p>' +
+      '<a class="button" href="' + target.replace(/"/g, '&quot;') + '">Otwórz aplikację</a>',
+    false
+  );
+
+  // replace(), żeby strona-pomost nie została w historii wstecz.
+  window.location.replace(target);
+})();
+</script>
+</body>
+</html>
