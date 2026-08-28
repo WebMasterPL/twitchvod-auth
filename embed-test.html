@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Test embedu — Twitch VOD</title>
+
+<!--
+  STRONA TESTOWA EMBEDU TWITCHA
+
+  Po co
+  -----
+  Sprawdzić, czy oficjalny embed Twitcha odtwarza VOD-y na iOS i czy
+  respektuje sesję zalogowanego użytkownika przy materiałach sub-only.
+  Otwierana ręcznie w Safari na iPadzie - nie jest częścią aplikacji.
+
+  Jak działa parametr parent
+  --------------------------
+  Twitch przepisuje wartość `parent` wprost do nagłówka odpowiedzi:
+      Content-Security-Policy: frame-ancestors https://<parent>
+  Przeglądarka pozwoli osadzić ramkę tylko wtedy, gdy origin strony
+  nadrzędnej zgadza się co do znaku. Ta strona jest serwowana z
+  https://webmasterpl.github.io, więc parent to gola nazwa hosta:
+  "webmasterpl.github.io" - BEZ protokołu. Wpisanie "https://..."
+  powoduje, że Twitch nie odsyła nagłówka CSP w ogóle i embed odmawia.
+
+  Zero zależności: brak CDN-ów, brak analytics, brak cookies własnych.
+-->
+
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0e0e10;
+    --surface: #18181b;
+    --border: #2a2a30;
+    --text: #efeff1;
+    --muted: #adadb8;
+    --accent: #9147ff;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: env(safe-area-inset-top) 16px 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  main { max-width: 900px; margin: 0 auto; padding-top: 16px; }
+
+  h1 { font-size: 18px; margin: 0 0 4px; }
+
+  p { color: var(--muted); font-size: 14px; margin: 0 0 16px; }
+  p code { color: var(--text); }
+
+  .frame {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .frame iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+
+  .note {
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .note strong { color: var(--text); }
+  .note code {
+    color: var(--text);
+    word-break: break-all;
+  }
+</style>
+</head>
+
+<body>
+<main id="root"></main>
+
+<script>
+(function () {
+  'use strict';
+
+  // Gola nazwa hosta - z protokolem Twitch nie odsyla naglowka CSP.
+  var PARENT = 'webmasterpl.github.io';
+  var root = document.getElementById('root');
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  var params = new URLSearchParams(window.location.search || '');
+  var raw = (params.get('v') || params.get('video') || '').trim();
+
+  // Przyjmujemy 123456789, v123456789 albo wklejony adres
+  // https://www.twitch.tv/videos/123456789
+  var match = /(\d{6,})/.exec(raw);
+  var videoId = match ? match[1] : '';
+
+  if (!videoId) {
+    root.innerHTML =
+      '<h1>Brak identyfikatora VOD-a</h1>' +
+      '<p>Dopisz do adresu <code>?v=</code> i numer VOD-a.</p>' +
+      '<div class="note">' +
+        '<strong>Przykład:</strong><br>' +
+        '<code>' + escapeHtml(window.location.origin + window.location.pathname) +
+        '?v=123456789</code><br><br>' +
+        'Numer znajdziesz w adresie VOD-a na Twitchu: ' +
+        '<code>twitch.tv/videos/<strong>123456789</strong></code>. ' +
+        'Możesz też wkleić cały adres po <code>?v=</code> — numer zostanie z niego wyjęty.' +
+      '</div>';
+    return;
+  }
+
+  var src =
+    'https://player.twitch.tv/?video=' + encodeURIComponent(videoId) +
+    '&parent=' + encodeURIComponent(PARENT) +
+    '&autoplay=false';
+
+  root.innerHTML =
+    '<h1>VOD ' + escapeHtml(videoId) + '</h1>' +
+    '<p>parent=<code>' + escapeHtml(PARENT) + '</code></p>' +
+    '<div class="frame">' +
+      '<iframe src="' + escapeHtml(src) + '" ' +
+        'allowfullscreen ' +
+        'allow="autoplay; fullscreen; picture-in-picture; encrypted-media" ' +
+        'referrerpolicy="strict-origin-when-cross-origin"></iframe>' +
+    '</div>' +
+    '<div class="note">' +
+      '<strong>Co sprawdzić:</strong><br>' +
+      '1. Czy publiczny VOD w ogóle rusza.<br>' +
+      '2. Czy działa pełny ekran i czy pojawia się ikona AirPlay.<br>' +
+      '3. Czy VOD sub-only gra — Safari ma Twoją sesję Twitcha, więc jeśli ' +
+      'embed ją respektuje, materiał subskrypcyjny powinien ruszyć. Jeśli ' +
+      'zobaczysz komunikat o wymaganej subskrypcji mimo aktywnej — embed ' +
+      'sesji nie honoruje.<br><br>' +
+      '<strong>Adres ramki:</strong><br><code>' + escapeHtml(src) + '</code>' +
+    '</div>';
+})();
+</script>
+</body>
+</html>
